@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="hy">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Քաղաքային տրանսպորտ — Տեսարան</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    body{font-family: Arial, Helvetica, sans-serif; margin:0; padding:0;}
+    header{background:#0b5ed7;color:white;padding:12px 16px}
+    .container{display:flex;gap:16px;padding:12px}
+    .left{width:360px}
+    .map{flex:1;min-height:520px;border:1px solid #ddd}
+    .card{background:#fff;padding:10px;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:12px}
+    input.search{width:100%;padding:8px;margin-bottom:8px}
+    ul.list{list-style:none;padding:0;margin:0;max-height:360px;overflow:auto}
+    li.item{padding:8px;border-bottom:1px solid #eee;cursor:pointer}
+    li.item:hover{background:#f1f7ff}
+    table.schedule{width:100%;border-collapse:collapse}
+    table.schedule th, table.schedule td{padding:6px;border:1px solid #eee;text-align:left;font-size:14px}
+  </style>
+</head>
+<body>
+  <header>
+    <h2>Կապանի համայնքային տրանսպորտ</h2>
+  </header>
+  <div class="container">
+    <div class="left">
+      <div class="card">
+        <input id="search" class="search" placeholder="Փնտրել համար, կանգառ կամ երթուղի..."></input>
+        <ul id="lines" class="list"></ul>
+      </div>
+      <div id="details" class="card">
+        <h3 id="line-title">Ընտրեք համար</h3>
+        <div id="stops"></div>
+        <h4>Չվացուցակ</h4>
+        <div id="schedule"></div>
+      </div>
+    </div>
+    <div class="map" id="map"></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+  // ------------------ ՍԱՄՓԼ ՏՎՅԱԼՆԵՐ (ՓՈՓՈԽԵՔ ՏՈՒԵՔ՝ Ըստ ՔՈ ՔԱՂԱՔԻ) ------------------
+  const data = [
+    {
+      id: "1",
+      number: "N6",
+      type: "bus",
+      name: "Կայարան հրապարակ — Բաղաբերդ(վերջի գես)",
+      color: "#FF5722",
+      route: [
+        {name: "Կայարան հրապարակ", lat:39.202007, lng:46.414407
+
+          },
+        {name: "Հունան", lat:39.207647, lng:46.397151},
+        {name: "Բաղաբերդ(վերջի գես)", lat:39.222764, lng:46.348988}
+
+             ],
+      schedule: {
+        weekdays: ["06:00","06:30","07:00","07:30","08:00","08:30","09:00","09:30","10:00","11:00","12:00","13:00","14:00","15:00","16:00","17:00","18:00","19:00","20:00","21:00"],
+        weekends: ["07:00","09:00","11:00","13:00","15:00","17:00","19:00"]
+                }    
+    },
+    {
+      id: "2",
+      number: "N5",
+      type: "minibus",
+      name: "Բաղաբերդ(վերջի գես)— Սովղոզ",
+      color: "#2196F3",
+      route: [
+        {name: "Բաղաբերդ(վերջի գես)", lat:40.375, lng:45.374},
+        {name: "Սովխոզ", lat:40.380, lng:45.380}
+             ],
+      schedule: {
+        weekdays: ["06:15","06:45","07:15","07:45","08:15","08:45","09:15","10:15","11:15","12:15","13:15","14:15","15:15","16:15","17:15","18:15","19:15","20:15"],
+        weekends: ["08:00","10:00","12:00","14:00","16:00","18:00"]
+                }
+    },
+    {
+      id: "3",
+      number: "N2",
+      type: "minibus",
+      name: "Բաղաբերդ(վերջի գես)— Սովղոզ",
+      color: "#2196F3",
+      route: [
+        {name: "Բաղաբերդ(վերջի գես)", lat:40.375, lng:45.374},
+        {name: "Սովխոզ", lat:40.380, lng:45.380}
+             ],
+      schedule: {
+        weekdays: ["06:15","06:45","07:15","07:45","08:15","08:45","09:15","10:15","11:15","12:15","13:15","14:15","15:15","16:15","17:15","18:15","19:15","20:15"],
+        weekends: ["08:00","10:00","12:00","14:00","16:00","18:00"]
+                }
+    }
+  ];
+  // ------------------ /ՍԱՄՓԼ ՏՎՅԱԼՆԵՐ ------------------
+
+  // Ստացված տվյալների հիման վրա UI կառուցում
+  const linesEl = document.getElementById('lines');
+  const searchEl = document.getElementById('search');
+  const lineTitle = document.getElementById('line-title');
+  const stopsEl = document.getElementById('stops');
+  const scheduleEl = document.getElementById('schedule');
+
+  // Leaflet map
+  const map = L.map('map').setView([40.37, 45.37], 13);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19}).addTo(map);
+  let currentLayer = null;
+
+  function renderList(items){
+    linesEl.innerHTML = '';
+    items.forEach(item=>{
+      const li = document.createElement('li');
+      li.className = 'item';
+      li.innerHTML = `<strong>${item.number}</strong> — ${item.name}`;
+      li.onclick = ()=> showLine(item);
+      linesEl.appendChild(li);
+    });
+  }
+
+  function showLine(item){
+    lineTitle.textContent = `${item.number} — ${item.name}`;
+    // կանգառներ
+    stopsEl.innerHTML = '<ol>' + item.route.map(s=>`<li>${s.name} (${s.lat.toFixed(3)}, ${s.lng.toFixed(3)})</li>`).join('') + '</ol>';
+    // չվացուցակ
+    const times = item.schedule.weekdays; // միայն օրինակի համար
+    scheduleEl.innerHTML = '<table class="schedule"><thead><tr><th>Օր</th><th>Ժամերը</th></tr></thead><tbody>' +
+      `<tr><td>Շաբաթ-օրեր</td><td>${item.schedule.weekdays.join(', ')}</td></tr>` +
+      `<tr><td>Շաբաթ</td><td>${item.schedule.weekends.join(', ')}</td></tr>` +
+      '</tbody></table>';
+
+    // քարտեզ - ջնջել նախորդը
+    if(currentLayer){ map.removeLayer(currentLayer); }
+    const latlngs = item.route.map(p=>[p.lat,p.lng]);
+    currentLayer = L.polyline(latlngs, {color: item.color||'#1E90FF'}).addTo(map);
+    // նստատեղի մարկերներ
+    item.route.forEach((p, idx)=>{
+      L.circleMarker([p.lat,p.lng], {radius:6}).bindPopup(`<strong>${idx+1}. ${p.name}</strong>`).addTo(map);
+    });
+    map.fitBounds(currentLayer.getBounds(), {padding:[20,20]});
+  }
+
+  // փնտրիչ
+  searchEl.addEventListener('input', ()=>{
+    const q = searchEl.value.trim().toLowerCase();
+    if(!q) return renderList(data);
+    const filtered = data.filter(item=>{
+      if(item.number.toLowerCase().includes(q)) return true;
+      if(item.name.toLowerCase().includes(q)) return true;
+      if(item.route.some(r=>r.name.toLowerCase().includes(q))) return true;
+      return false;
+    });
+    renderList(filtered);
+  });
+
+  // սկզբնական ցուցադրում
+  renderList(data);
+
+  // Ավտո ընտրել առաջինը (եթե կա)
+  if(data.length>0) showLine(data[0]);
+
+  // Հուշում՝ տվյալներ ստանալու օրինակ CSV -> JSON (դրանից հետո պետք է վարվի backend-ով)
+  // Ստուգեք README կամ ասա, եթե ուզում ես backend + upload GUI՝ կգրեմ նաև Node/Express օրինակ
+  </script>
+</body>
+</html>
